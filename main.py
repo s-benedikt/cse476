@@ -3,7 +3,9 @@ import json
 from pathlib import Path
 from typing import Any, Dict
 
-from src.agent import Agent	
+from src.agent import Agent, write_answers_csv
+import subprocess
+from pathlib import Path as Path
 
 
 def run(input_path: Path, output_path: Path):
@@ -51,6 +53,9 @@ def main() -> None:
 	parser.add_argument("--output", type=str, default="outputs/output.json")
 	args = parser.parse_args()
 
+
+	csv_out = Path("outputs/agent_answers.csv")
+	write_answers_csv(Path(args.input), csv_out)
 	run(Path(args.input), Path(args.output))
 
 if __name__ == "__main__":
