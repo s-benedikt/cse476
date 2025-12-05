@@ -1,25 +1,20 @@
-import re
+
 from .api import call_model_chat_completions
 
 
 def getAnswer(text: str):
-    # Prefer explicit 'Final:' tail
+
     lines = [ln.strip() for ln in text.strip().splitlines() if ln.strip()]
     for ln in reversed(lines):
-        if ln.lower().startswith("final:"):
-            return ln.split(":", 1)[1].strip()
-
-    # try last number
-    m_all = re.findall(r"-?\d+\.\d+|-?\d+/\d+|-?\d+", text)
-    if m_all:
-        return m_all[-1] 
-    else:
-        # return last word
-        words = re.findall(r"\S+", text)
-        if words:
-            return words[-1]
-        else:   
-            return None # nothing found (worst case)
+        if ln.lower().startswith(("final", "answer", "result")):
+            ans = ln.split(":", 1)[1].strip()
+            # remove latex
+            ans = ans.strip('$').strip()
+            return ans
+    cleaned = text.strip().strip('$').strip()
+    if len(cleaned) < 100 and not '\n' in cleaned:
+        return cleaned
+    return None
 
 
 class Agent:
@@ -44,51 +39,74 @@ class Agent:
 
         checked = self.critic(problem, candidate)
         return (checked.get("final") or candidate or "").strip()
-
-    def critic(self, problem: str, answer: str):
-        system = "You are a strict critic. Output only the final answer."
+    
+    def critic(self, problem: str, candidates: list) -> str:
+        """Ask critic to select the best answer from multiple candidates."""
+        cands_str = "\n".join([f"Option {i+1}: {c}" for i, c in enumerate(candidates)])
+        system = "You are a strict critic. Evaluate the options and output JUST THE VALUE of the correct answer, not the option label. Do not provide any explanation."
         prompt = (
-            f"Problem:\n{problem}\n\nProposed answer: {answer}\n"
-            "Verify. If wrong, provide the corrected final answer."
+            f"Problem:\n{problem}\n\n{cands_str}\n\n"
+            "Which option is correct? Reply with the actual answer value in the format: Final: <answer value>\n"
+            "Do NOT reply with 'Option 1' or 'Option 2' - reply with the actual numeric/text answer. Do not provide any explanation."
         )
-        r = call_model_chat_completions(prompt, system, temperature=0.0, timeout=10)
+        r = call_model_chat_completions(prompt, system, temperature=0.0)
         final = getAnswer(str(r.get("text") or "")) if r.get("ok") else None
-        return {"ok": r.get("ok"), "text": r.get("text"), "final": final}
+        print(f"[Critic] selected={final}")
+        if not final or final.lower().startswith('option'):
+            return candidates[0].strip()
+        return final.strip()
+
+    def evaluate_tests(self, tests):
+        rows = []
+        for t in tests:
+            got = self.solve(t["prompt"])
+            is_correct = self.grade(t["expected"], got, t.get("type", "exact"))
+            rows.append({
+                "id": t["id"],
+                "expected": t["expected"],
+                "got": got,
+                "correct": is_correct,
+            })
+
+        correct = sum(1 for x in rows if x["correct"])
+        print(f"accuracy={correct/len(rows) if rows else 0}")
+        return rows
+
+    def grade(self, expected: str, got: str, kind: str) -> bool:
+        if not expected or not got:
+            return False
+        return str(expected).strip().lower() == str(got).strip().lower()
 
 
-def batch_solve_questions(questions: list) -> list:
-    agent = Agent()
-    outputs = []
-    for q in questions:
-        input = q.get("input", "")
-        try:
-            out = agent.solve(input)
-        except Exception:
-            out = ""
-        if out is None:
-            out = ""
-        outputs.append(str(out).strip())
-    return outputs
 
 def write_answers_csv(input_path, csv_path):
+
     import json
     import csv
     from pathlib import Path
 
     p = Path(input_path)
     if not p.exists():
-        raise FileNotFoundError(f"Input file not found")
+        raise FileNotFoundError("Input file not found")
 
-    with p.open("r") as file:
+    with p.open("r", encoding="utf-8") as file:
         data = json.load(file)
     if not isinstance(data, list):
         raise ValueError("Input must be a list of question objects")
 
-    answers = batch_solve_questions(data)
+    agent = Agent()
+    answers = []
+    for q in data:
+        inp = q.get("input", "")
+        try:
+            out = agent.solve(inp)
+        except Exception:
+            out = ""
+        answers.append(out or "")
 
     outp = Path(csv_path)
     outp.parent.mkdir(parents=True, exist_ok=True)
-    with outp.open("w", newline="") as file:
+    with outp.open("w", encoding="utf-8", newline="") as file:
         writer = csv.writer(file)
         writer.writerow(["index", "output"])
         for i, ans in enumerate(answers, start=1):

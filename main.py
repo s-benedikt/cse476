@@ -1,11 +1,11 @@
 import argparse 	
-import json			
+import json		
 from pathlib import Path
 from typing import Any, Dict
 
-from src.agent import Agent, write_answers_csv
 import subprocess
 from pathlib import Path as Path
+from src.agent import Agent, write_answers_csv
 
 
 def run(input_path: Path, output_path: Path):
@@ -33,10 +33,15 @@ def run(input_path: Path, output_path: Path):
 	outputs: list[Dict[str, Any]] = []
 
 	# Process each example
-	for ex in data:
+	accuracy = 0
+	for i, ex in enumerate(data, start=1):
 		problem = ex.get("input", "")
 		gold = ex.get("output")
 		pred = agent.solve(problem)
+		gold_display = gold if gold is not None else "N/A"
+		print(f"question {i}: prediction: {pred} gold: {gold_display}")
+		if gold:
+			agent.evaluate_tests([{"id": i, "prompt": problem, "expected": gold, "type": "exact"}])
 		outputs.append({
 			"input": problem,
 			"prediction": pred,
@@ -55,8 +60,8 @@ def main() -> None:
 
 
 	csv_out = Path("outputs/agent_answers.csv")
-	write_answers_csv(Path(args.input), csv_out)
 	run(Path(args.input), Path(args.output))
+	write_answers_csv(Path(args.input), csv_out)
 
 if __name__ == "__main__":
 	main()
