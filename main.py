@@ -6,49 +6,52 @@ from typing import Any, Dict
 from src.agent import Agent	
 
 
-def run(input_path: Path, output_path: Path, limit: int | None, max_calls: int, sc_samples: int):
+def run(input_path: Path, output_path: Path):
 	"""
 	Run the agent
 	"""
-	# data = data[:]
+	if not input_path.exists():
+		raise FileNotFoundError(f"Input file not found: {input_path}")
+	data_text = input_path.read_text(encoding="utf-8")
+	try:
+		data = json.loads(data_text)
+	except json.JSONDecodeError as e:
+		raise ValueError(f"Input file is not valid JSON: {e}") from e
+
 	if not isinstance(data, list):				
 		raise ValueError("Input JSON must be a list of {input, ...} objects")
 
-	if limit is not None:			
-		data = data[:limit]
 
-	agent = Agent(max_calls=max_calls, sc_samples=sc_samples) # create agent for solving 
 
+	try:
+		agent = Agent() 
+	except Exception as e:
+		raise RuntimeError(f"Failed to create Agent: {e}") from e
+	
 	outputs: list[Dict[str, Any]] = []
 
 	# Process each example
 	for ex in data:
 		problem = ex.get("input", "")
 		gold = ex.get("output")
-		pred, meta = agent.solve(problem) #TODO
+		pred = agent.solve(problem)
 		outputs.append({
 			"input": problem,
 			"prediction": pred,
 			"gold": gold,
-			"calls_used": meta.get("calls_used"),
-			"trace": meta,
 		})
 
 	output_path.parent.mkdir(parents=True, exist_ok=True)
-	output_path.write_text(json.dumps(outputs, indent=2))
+	output_path.write_text(json.dumps(outputs, indent=2), encoding="utf-8")
 
 # parse arguments
 def main() -> None:
 	parser = argparse.ArgumentParser()
 	parser.add_argument("--input", type=str, default="contents/cse476_final_project_dev_data.json")
 	parser.add_argument("--output", type=str, default="outputs/output.json")
-	parser.add_argument("--limit", type=int, default=None)
-	parser.add_argument("--max-calls", type=int, default=12)
-	parser.add_argument("--sc-samples", type=int, default=5)
 	args = parser.parse_args()
 
-	run(Path(args.input), Path(args.output), args.limit, args.max_calls, args.sc_samples)
-
+	run(Path(args.input), Path(args.output))
 
 if __name__ == "__main__":
 	main()
