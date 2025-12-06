@@ -5,13 +5,11 @@ from typing import Any, Dict
 
 import subprocess
 from pathlib import Path as Path
-from src.agent import Agent, write_answers_csv
+from src.agent import Agent
+from concurrent.futures import ThreadPoolExecutor
 
 
 def run(input_path: Path, output_path: Path):
-	"""
-	Run the agent
-	"""
 	if not input_path.exists():
 		raise FileNotFoundError(f"Input file not found: {input_path}")
 	data_text = input_path.read_text(encoding="utf-8")
@@ -31,28 +29,32 @@ def run(input_path: Path, output_path: Path):
 		raise RuntimeError(f"Failed to create Agent: {e}") from e
 	
 	outputs: list[Dict[str, Any]] = []
+	output_path.parent.mkdir(parents=True, exist_ok=True)
 
-	# Process each example
-	accuracy = 0
-	for i, ex in enumerate(data, start=1):
-		problem = ex.get("input", "")
-		gold = ex.get("output")
+	def solve_example(item):
+		i, example = item
+		problem = example.get("input", "")
+		gold = example.get("output")
 		pred = agent.solve(problem)
+		return i, problem, gold, pred
+
+	with ThreadPoolExecutor() as executor:
+		solved = list(executor.map(solve_example, enumerate(data, start=1)))
+
+	for i, problem, gold, pred in solved:
 		gold_display = gold if gold is not None else "N/A"
 		print(f"question {i}: prediction: {pred} gold: {gold_display}")
-		if gold:
-			agent.evaluate_tests([{"id": i, "prompt": problem, "expected": gold, "type": "exact"}])
 		outputs.append({
 			"input": problem,
 			"prediction": pred,
 			"gold": gold,
 		})
 
-	output_path.parent.mkdir(parents=True, exist_ok=True)
+
 	output_path.write_text(json.dumps(outputs, indent=2), encoding="utf-8")
 
 # parse arguments
-def main() -> None:
+def main():
 	parser = argparse.ArgumentParser()
 	parser.add_argument("--input", type=str, default="contents/cse476_final_project_dev_data.json")
 	parser.add_argument("--output", type=str, default="outputs/output.json")
@@ -61,7 +63,7 @@ def main() -> None:
 
 	csv_out = Path("outputs/agent_answers.csv")
 	run(Path(args.input), Path(args.output))
-	write_answers_csv(Path(args.input), csv_out)
+	return json.loads(Path(args.output).read_text(encoding="utf-8"))
 
 if __name__ == "__main__":
 	main()
